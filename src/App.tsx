@@ -333,6 +333,8 @@ function App() {
   const [showCodes, setShowCodes] = useState(false);
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [showGridAlways, setShowGridAlways] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [mobileInspectorOpen, setMobileInspectorOpen] = useState(false);
   const [toast, setToast] = useState("");
   const [dragState, setDragState] = useState<DragState | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -355,6 +357,13 @@ function App() {
     return [activeBook.title, ...pages.map((item) => item.title)];
   }, [activeBook, currentPage, data.pages]);
   const showGrid = Boolean(currentPage?.gridEnabled && (dragState || snapToGrid || showGridAlways));
+  const shellClassName = [
+    "square-shell",
+    mobileSidebarOpen ? "sidebar-open" : "",
+    mobileInspectorOpen ? "inspector-open" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -594,6 +603,8 @@ function App() {
     setSelectedBlockId(null);
     setEditingBlockId(null);
     setEditingPageTitle(false);
+    setMobileSidebarOpen(false);
+    setMobileInspectorOpen(false);
   }
 
   function updatePageTitle(pageId: string, title: string) {
@@ -787,7 +798,7 @@ function App() {
   }
 
   return (
-    <div className="square-shell">
+    <div className={shellClassName}>
       <header className="topbar">
         <div className="brand">
           <SquareIcon src={ICONS.logo} size={42} />
@@ -796,12 +807,27 @@ function App() {
             <div className="app-meta">개인용 블록 캔버스</div>
           </div>
         </div>
+        <div className="mobile-top-actions">
+          <button className="mobile-nav-button" onClick={() => setMobileSidebarOpen((open) => !open)}>
+            Pages
+          </button>
+          <button
+            className="mobile-nav-button"
+            disabled={!selectedBlock}
+            onClick={() => setMobileInspectorOpen((open) => !open)}
+          >
+            속성
+          </button>
+        </div>
       </header>
 
       <aside className="sidebar">
         <div className="sidebar-head">
           <div className="panel-title">Books</div>
-          <button className="mini-action" onClick={addBook}>+ Book</button>
+          <div className="sidebar-head-actions">
+            <button className="mini-action" onClick={addBook}>+ Book</button>
+            <button className="mobile-close-button" onClick={() => setMobileSidebarOpen(false)}>닫기</button>
+          </div>
         </div>
         <nav className="book-tree">
           {data.bookIds.map((bookId) => {
@@ -964,7 +990,10 @@ function App() {
       </main>
 
       <aside className="inspector">
-        <div className="panel-title">Properties</div>
+        <div className="inspector-head">
+          <div className="panel-title">Properties</div>
+          <button className="mobile-close-button" onClick={() => setMobileInspectorOpen(false)}>닫기</button>
+        </div>
         {selectedBlock ? (
           <div className="property-list">
             {showCodes && <div className="selected-code">{selectedBlock.code}</div>}
@@ -1031,6 +1060,13 @@ function App() {
           <p className="empty-state">선택된 Block이 없습니다.</p>
         )}
       </aside>
+      {selectedBlock && (
+        <div className="mobile-block-toolbar">
+          <button onClick={() => setEditingBlockId(selectedBlock.id)}>편집</button>
+          <button onClick={() => setMobileInspectorOpen(true)}>속성</button>
+          <button className="danger-button" onClick={() => deleteBlock(selectedBlock.id)}>삭제</button>
+        </div>
+      )}
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
