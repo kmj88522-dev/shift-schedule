@@ -30,6 +30,15 @@ type SquarePage = {
 type TextAlign = "left" | "center" | "right";
 type FontWeight = "normal" | "bold";
 type EditMode = "design" | "content" | "function";
+type DeviceMode = "desktop" | "tablet" | "mobile";
+
+type BlockLayout = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  visible: boolean;
+};
 
 type SquareBlockStyle = {
   backgroundColor: string;
@@ -56,6 +65,7 @@ type SquareBlock = {
   y: number;
   width: number;
   height: number;
+  layoutsByDevice?: Partial<Record<DeviceMode, BlockLayout>>;
   content: {
     text?: string;
   };
@@ -152,6 +162,7 @@ const PASTEL_SWATCHES = [
   "#e9ecef",
   "#dfe5e1",
 ];
+const DEVICE_MODES: DeviceMode[] = ["desktop", "tablet", "mobile"];
 
 function now() {
   return new Date().toISOString();
@@ -196,6 +207,24 @@ function normalizeBlockStyle(style: Partial<SquareBlockStyle> | undefined): Squa
     normalized.fillEnabled = false;
   }
   return normalized;
+}
+
+function layoutFromBlock(block: Pick<SquareBlock, "x" | "y" | "width" | "height" | "visible">): BlockLayout {
+  return {
+    x: block.x,
+    y: block.y,
+    width: block.width,
+    height: block.height,
+    visible: block.visible,
+  };
+}
+
+function normalizeBlockLayouts(block: SquareBlock): Partial<Record<DeviceMode, BlockLayout>> {
+  const fallback = layoutFromBlock(block);
+  return {
+    desktop: fallback,
+    ...block.layoutsByDevice,
+  };
 }
 
 function snap(value: number, gridSize = GRID_SIZE) {
@@ -273,6 +302,7 @@ function migrateData(value: unknown): SquareData | null {
           {
             ...block,
             style: normalizeBlockStyle(block.style),
+            layoutsByDevice: normalizeBlockLayouts(block),
           },
         ]),
       ),
@@ -299,6 +329,7 @@ function migrateData(value: unknown): SquareData | null {
           {
             ...block,
             style: normalizeBlockStyle(block.style),
+            layoutsByDevice: normalizeBlockLayouts(block),
           },
         ]),
       ),
@@ -322,6 +353,7 @@ function migrateData(value: unknown): SquareData | null {
           {
             ...block,
             style: normalizeBlockStyle(block.style),
+            layoutsByDevice: normalizeBlockLayouts(block),
           },
         ]),
       ),
@@ -355,6 +387,7 @@ function App() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [showCodes, setShowCodes] = useState(false);
   const [editMode, setEditMode] = useState<EditMode>("design");
+  const [deviceMode, setDeviceMode] = useState<DeviceMode>("desktop");
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [showGridAlways, setShowGridAlways] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -369,6 +402,7 @@ function App() {
   const activeBook = data.books[activeBookId] ?? data.books[data.bookIds[0]];
   const currentPage = currentPageId ? data.pages[currentPageId] : undefined;
   const selectedBlock = selectedBlockId ? data.blocks[selectedBlockId] : undefined;
+  const selectedLayout = selectedBlock ? getBlockLayout(selectedBlock) : undefined;
   const currentBlocks = useMemo(() => {
     if (!currentPage) return [];
     return currentPage.blockIds.map((id) => data.blocks[id]).filter(Boolean);
@@ -389,6 +423,7 @@ function App() {
   const shellClassName = [
     "square-shell",
     `mode-${editMode}`,
+    `device-${deviceMode}`,
     mobileSidebarOpen ? "sidebar-open" : "",
     mobileInspectorOpen ? "inspector-open" : "",
     mobileToolsOpen ? "tools-open" : "",
@@ -649,6 +684,43 @@ function App() {
     }));
   }
 
+  function getBlockLayout(block: SquareBlock, mode: DeviceMode = deviceMode): BlockLayout {
+    return block.layoutsByDevice?.[mode] ?? block.layoutsByDevice?.desktop ?? layoutFromBlock(block);
+  }
+
+  function updateBlockLayout(blockId: string, patch: Partial<BlockLayout>) {
+    commitData((previous) => {
+      const block = previous.blocks[blockId];
+      if (!block) return previous;
+      const layoutsByDevice = normalizeBlockLayouts(block);
+      const currentLayout = layoutsByDevice[deviceMode] ?? layoutsByDevice.desktop ?? layoutFromBlock(block);
+      const nextLayout = { ...currentLayout, ...patch };
+      const nextLayouts = { ...layoutsByDevice, [deviceMode]: nextLayout };
+      const legacyPatch =
+        deviceMode === "desktop"
+          ? {
+              x: nextLayout.x,
+              y: nextLayout.y,
+              width: nextLayout.width,
+              height: nextLayout.height,
+              visible: nextLayout.visible,
+            }
+          : {};
+      return {
+        ...previous,
+        blocks: {
+          ...previous.blocks,
+          [blockId]: {
+            ...block,
+            ...legacyPatch,
+            layoutsByDevice: nextLayouts,
+            updatedAt: now(),
+          },
+        },
+      };
+    });
+  }
+
   function getCanvasBounds() {
     const rect = canvasRef.current?.getBoundingClientRect();
     const width = Math.floor(rect?.width ?? 1200);
@@ -686,8 +758,10 @@ function App() {
 
     currentBlocks.forEach((block) => {
       if (block.id === blockId) return;
-      const otherCenterX = block.x + block.width / 2;
-      const otherCenterY = block.y + block.height / 2;
+      const layout = getBlockLayout(block);
+      if (!layout.visible) return;
+      const otherCenterX = layout.x + layout.width / 2;
+      const otherCenterY = layout.y + layout.height / 2;
       if (Math.abs(centerX - otherCenterX) <= GUIDE_THRESHOLD) guide.x = otherCenterX;
       if (Math.abs(centerY - otherCenterY) <= GUIDE_THRESHOLD) guide.y = otherCenterY;
     });
@@ -730,6 +804,11 @@ function App() {
           y: rect.y,
           width: rect.width,
           height: rect.height,
+          layoutsByDevice: {
+            desktop: { ...rect, visible: true },
+            tablet: { ...rect, visible: true },
+            mobile: { ...rect, visible: true },
+          },
           content: { text: "New text block" },
           value: null,
           style: defaultBlockStyle(),
@@ -790,6 +869,7 @@ function App() {
 
   function startMove(event: PointerEvent<HTMLDivElement>, block: SquareBlock) {
     if (editingBlockId === block.id) return;
+    const layout = getBlockLayout(block);
     event.currentTarget.setPointerCapture(event.pointerId);
     setSelectedBlockId(block.id);
     setDragState({
@@ -797,12 +877,13 @@ function App() {
       blockId: block.id,
       startX: event.clientX,
       startY: event.clientY,
-      originalX: block.x,
-      originalY: block.y,
+      originalX: layout.x,
+      originalY: layout.y,
     });
   }
 
   function startResize(event: PointerEvent<HTMLButtonElement>, block: SquareBlock) {
+    const layout = getBlockLayout(block);
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     setSelectedBlockId(block.id);
@@ -811,8 +892,8 @@ function App() {
       blockId: block.id,
       startX: event.clientX,
       startY: event.clientY,
-      originalWidth: block.width,
-      originalHeight: block.height,
+      originalWidth: layout.width,
+      originalHeight: layout.height,
     });
   }
 
@@ -838,17 +919,18 @@ function App() {
     if (dragState.mode === "move") {
       const block = data.blocks[dragState.blockId];
       if (!block) return;
+      const layout = getBlockLayout(block);
       const nextX = dragState.originalX + dx;
       const nextY = dragState.originalY + dy;
       const rect = clampBlockRect(
         snapToGrid ? snap(nextX, gridSize) : nextX,
         snapToGrid ? snap(nextY, gridSize) : nextY,
-        block.width,
-        block.height,
+        layout.width,
+        layout.height,
         snapToGrid,
       );
       setAlignmentGuide(getAlignmentGuide(block.id, rect.x, rect.y, rect.width, rect.height));
-      updateBlock(dragState.blockId, {
+      updateBlockLayout(dragState.blockId, {
         x: rect.x,
         y: rect.y,
       });
@@ -863,17 +945,18 @@ function App() {
     }
     const block = data.blocks[dragState.blockId];
     if (!block) return;
+    const layout = getBlockLayout(block);
     const nextWidth = Math.max(MIN_BLOCK_WIDTH, dragState.originalWidth + dx);
     const nextHeight = Math.max(MIN_BLOCK_HEIGHT, dragState.originalHeight + dy);
     const rect = clampBlockRect(
-      block.x,
-      block.y,
+      layout.x,
+      layout.y,
       snapToGrid ? Math.max(MIN_BLOCK_WIDTH, snap(nextWidth, gridSize)) : nextWidth,
       snapToGrid ? Math.max(MIN_BLOCK_HEIGHT, snap(nextHeight, gridSize)) : nextHeight,
       snapToGrid,
     );
     setAlignmentGuide(getAlignmentGuide(block.id, rect.x, rect.y, rect.width, rect.height));
-    updateBlock(dragState.blockId, {
+    updateBlockLayout(dragState.blockId, {
       width: rect.width,
       height: rect.height,
     });
@@ -1041,6 +1124,13 @@ function App() {
                     </button>
                   ))}
                 </div>
+                <div className="device-mode-tabs" aria-label="device layout mode">
+                  {DEVICE_MODES.map((mode) => (
+                    <button className={deviceMode === mode ? "active" : ""} key={mode} onClick={() => setDeviceMode(mode)}>
+                      {mode === "desktop" ? "Desktop" : mode === "tablet" ? "Tablet" : "Mobile"}
+                    </button>
+                  ))}
+                </div>
                 <label className="toolbar-toggle">
                   <input type="checkbox" checked={showGridAlways} onChange={(event) => setShowGridAlways(event.target.checked)} />
                   그리드
@@ -1076,6 +1166,8 @@ function App() {
             >
               {currentBlocks.map((block) => {
                 const style = normalizeBlockStyle(block.style);
+                const layout = getBlockLayout(block);
+                if (!layout.visible) return null;
                 return (
                   <div
                     className={[
@@ -1088,10 +1180,10 @@ function App() {
                       .join(" ")}
                     key={block.id}
                     style={{
-                      left: block.x,
-                      top: block.y,
-                      width: block.width,
-                      height: block.height,
+                      left: layout.x,
+                      top: layout.y,
+                      width: layout.width,
+                      height: layout.height,
                       backgroundColor: style.fillEnabled ? style.backgroundColor : "transparent",
                       color: style.textColor,
                       fontSize: style.fontSize,
@@ -1206,12 +1298,21 @@ function App() {
             </section>
             <section className="property-section design-section">
               <h2>Layout</h2>
-              <div className="size-grid">
-                <label>X<input type="number" value={Math.round(selectedBlock.x)} onChange={(event) => updateBlock(selectedBlock.id, clampBlockRect(Number(event.target.value), selectedBlock.y, selectedBlock.width, selectedBlock.height))} /></label>
-                <label>Y<input type="number" value={Math.round(selectedBlock.y)} onChange={(event) => updateBlock(selectedBlock.id, clampBlockRect(selectedBlock.x, Number(event.target.value), selectedBlock.width, selectedBlock.height))} /></label>
-                <label>W<input type="number" value={Math.round(selectedBlock.width)} onChange={(event) => updateBlock(selectedBlock.id, clampBlockRect(selectedBlock.x, selectedBlock.y, Number(event.target.value), selectedBlock.height))} /></label>
-                <label>H<input type="number" value={Math.round(selectedBlock.height)} onChange={(event) => updateBlock(selectedBlock.id, clampBlockRect(selectedBlock.x, selectedBlock.y, selectedBlock.width, Number(event.target.value)))} /></label>
-              </div>
+              {selectedLayout && (
+                <>
+                  <div className="layout-mode-note">현재 {deviceMode} 레이아웃을 편집 중입니다.</div>
+                  <label className="checkbox-row">
+                    <input type="checkbox" checked={selectedLayout.visible} onChange={(event) => updateBlockLayout(selectedBlock.id, { visible: event.target.checked })} />
+                    이 기기에서 표시
+                  </label>
+                  <div className="size-grid">
+                    <label>X<input type="number" value={Math.round(selectedLayout.x)} onChange={(event) => updateBlockLayout(selectedBlock.id, clampBlockRect(Number(event.target.value), selectedLayout.y, selectedLayout.width, selectedLayout.height, snapToGrid))} /></label>
+                    <label>Y<input type="number" value={Math.round(selectedLayout.y)} onChange={(event) => updateBlockLayout(selectedBlock.id, clampBlockRect(selectedLayout.x, Number(event.target.value), selectedLayout.width, selectedLayout.height, snapToGrid))} /></label>
+                    <label>W<input type="number" value={Math.round(selectedLayout.width)} onChange={(event) => updateBlockLayout(selectedBlock.id, clampBlockRect(selectedLayout.x, selectedLayout.y, Number(event.target.value), selectedLayout.height, snapToGrid))} /></label>
+                    <label>H<input type="number" value={Math.round(selectedLayout.height)} onChange={(event) => updateBlockLayout(selectedBlock.id, clampBlockRect(selectedLayout.x, selectedLayout.y, selectedLayout.width, Number(event.target.value), snapToGrid))} /></label>
+                  </div>
+                </>
+              )}
             </section>
             <button className="danger-button" onClick={() => deleteBlock(selectedBlock.id)}>Block 삭제</button>
           </div>

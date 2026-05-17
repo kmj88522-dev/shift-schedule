@@ -151,9 +151,9 @@ textarea {
   gap: 8px;
 }
 
-.edit-mode-tabs {
+.edit-mode-tabs,
+.device-mode-tabs {
   display: inline-grid;
-  grid-template-columns: repeat(3, auto);
   gap: 4px;
   padding: 3px;
   border: 1px solid #d5cdbf;
@@ -161,7 +161,17 @@ textarea {
   background: #fffefa;
 }
 
-.edit-mode-tabs button {
+.edit-mode-tabs {
+  grid-template-columns: repeat(3, auto);
+}
+
+.device-mode-tabs {
+  grid-template-columns: repeat(3, auto);
+  background: #f7f3ea;
+}
+
+.edit-mode-tabs button,
+.device-mode-tabs button {
   min-height: 26px;
   padding: 0 9px;
   border: 0;
@@ -171,7 +181,8 @@ textarea {
   font-weight: 800;
 }
 
-.edit-mode-tabs button.active {
+.edit-mode-tabs button.active,
+.device-mode-tabs button.active {
   background: #e6f1ea;
   color: #245d40;
 }
@@ -670,6 +681,12 @@ textarea {
   font-size: 13px;
 }
 
+.layout-mode-note {
+  color: #6c665c;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .mode-design .content-section,
 .mode-content .design-section {
   opacity: 0.42;
@@ -984,6 +1001,11 @@ textarea {
   }
 
   .edit-mode-tabs {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .device-mode-tabs {
     grid-column: 1 / -1;
     grid-template-columns: repeat(3, 1fr);
   }
