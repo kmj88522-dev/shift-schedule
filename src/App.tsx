@@ -33,6 +33,7 @@ type EditMode = "design" | "content" | "function";
 
 type SquareBlockStyle = {
   backgroundColor: string;
+  fillEnabled: boolean;
   textColor: string;
   fontSize: number;
   fontWeight: FontWeight;
@@ -122,18 +123,18 @@ type AlignmentGuide = {
 const STORAGE_KEY = "square-v0.1-data";
 const FALLBACK_STORAGE_KEY = "square:v0.1:state";
 const MIN_BLOCK_WIDTH = 96;
-const MIN_BLOCK_HEIGHT = 52;
+const MIN_BLOCK_HEIGHT = 60;
 const GRID_SIZE = 12;
 const GUIDE_THRESHOLD = 6;
+const ASSET_BASE_URL = import.meta.env.BASE_URL;
 const ICONS = {
-  logo: "/icons/square-logo.png",
-  book: "/icons/square-book.png",
-  page: "/icons/square-page.png",
-  subpage: "/icons/square-subpage.png",
-  block: "/icons/square-block.png",
+  logo: `${ASSET_BASE_URL}icons/square-logo.png`,
+  book: `${ASSET_BASE_URL}icons/square-book.png`,
+  page: `${ASSET_BASE_URL}icons/square-page.png`,
+  subpage: `${ASSET_BASE_URL}icons/square-subpage.png`,
+  block: `${ASSET_BASE_URL}icons/square-block.png`,
 };
 const PASTEL_SWATCHES = [
-  "transparent",
   "#ffffff",
   "#fff7d6",
   "#ffe8cc",
@@ -166,12 +167,17 @@ function formatCode(prefix: string, value: number) {
 }
 
 function SquareIcon({ src, size = 18 }: { src: string; size?: number }) {
-  return <img className="square-icon" src={src} width={size} height={size} alt="" aria-hidden="true" />;
+  return (
+    <span className="square-icon-frame" style={{ width: size, height: size }} aria-hidden="true">
+      <img className="square-icon" src={src} width={size} height={size} alt="" onError={(event) => event.currentTarget.classList.add("failed")} />
+    </span>
+  );
 }
 
 function defaultBlockStyle(): SquareBlockStyle {
   return {
     backgroundColor: "#ffffff",
+    fillEnabled: true,
     textColor: "#202124",
     fontSize: 16,
     fontWeight: "normal",
@@ -184,11 +190,20 @@ function defaultBlockStyle(): SquareBlockStyle {
 }
 
 function normalizeBlockStyle(style: Partial<SquareBlockStyle> | undefined): SquareBlockStyle {
-  return { ...defaultBlockStyle(), ...style };
+  const normalized = { ...defaultBlockStyle(), ...style };
+  if (normalized.backgroundColor === "transparent") {
+    normalized.backgroundColor = "#ffffff";
+    normalized.fillEnabled = false;
+  }
+  return normalized;
 }
 
-function snap(value: number) {
-  return Math.max(0, Math.round(value / GRID_SIZE) * GRID_SIZE);
+function snap(value: number, gridSize = GRID_SIZE) {
+  return Math.max(0, Math.round(value / gridSize) * gridSize);
+}
+
+function snapAtLeast(value: number, minimum: number, gridSize = GRID_SIZE) {
+  return Math.max(minimum, Math.round(value / gridSize) * gridSize);
 }
 
 function createBookWithPage(bookNumber: number, pageNumber: number) {
@@ -344,6 +359,7 @@ function App() {
   const [showGridAlways, setShowGridAlways] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [mobileInspectorOpen, setMobileInspectorOpen] = useState(false);
+  const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
   const [toast, setToast] = useState("");
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [alignmentGuide, setAlignmentGuide] = useState<AlignmentGuide | null>(null);
@@ -368,11 +384,14 @@ function App() {
     return [activeBook.title, ...pages.map((item) => item.title)];
   }, [activeBook, currentPage, data.pages]);
   const showGrid = Boolean(currentPage?.gridEnabled && (dragState || snapToGrid || showGridAlways));
+  const gridSize = currentPage?.gridSize || GRID_SIZE;
+  const mobileTitle = currentPath.length > 0 ? currentPath.join(" / ") : "Square";
   const shellClassName = [
     "square-shell",
     `mode-${editMode}`,
     mobileSidebarOpen ? "sidebar-open" : "",
     mobileInspectorOpen ? "inspector-open" : "",
+    mobileToolsOpen ? "tools-open" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -617,6 +636,7 @@ function App() {
     setEditingPageTitle(false);
     setMobileSidebarOpen(false);
     setMobileInspectorOpen(false);
+    setMobileToolsOpen(false);
   }
 
   function updatePageTitle(pageId: string, title: string) {
@@ -631,19 +651,25 @@ function App() {
 
   function getCanvasBounds() {
     const rect = canvasRef.current?.getBoundingClientRect();
+    const width = Math.floor(rect?.width ?? 1200);
+    const height = Math.floor(rect?.height ?? 760);
     return {
-      width: Math.max(MIN_BLOCK_WIDTH, Math.floor(rect?.width ?? 1200)),
-      height: Math.max(MIN_BLOCK_HEIGHT, Math.floor(rect?.height ?? 760)),
+      width: snapAtLeast(width, MIN_BLOCK_WIDTH, gridSize),
+      height: snapAtLeast(height, MIN_BLOCK_HEIGHT, gridSize),
     };
   }
 
-  function clampBlockRect(x: number, y: number, width: number, height: number) {
+  function clampBlockRect(x: number, y: number, width: number, height: number, shouldSnap = false) {
     const bounds = getCanvasBounds();
-    const nextWidth = Math.min(Math.max(MIN_BLOCK_WIDTH, width), bounds.width);
-    const nextHeight = Math.min(Math.max(MIN_BLOCK_HEIGHT, height), bounds.height);
+    const minWidth = snapAtLeast(MIN_BLOCK_WIDTH, MIN_BLOCK_WIDTH, gridSize);
+    const minHeight = snapAtLeast(MIN_BLOCK_HEIGHT, MIN_BLOCK_HEIGHT, gridSize);
+    const nextWidth = Math.min(shouldSnap ? snapAtLeast(width, minWidth, gridSize) : Math.max(minWidth, width), bounds.width);
+    const nextHeight = Math.min(shouldSnap ? snapAtLeast(height, minHeight, gridSize) : Math.max(minHeight, height), bounds.height);
+    const clampedX = Math.min(Math.max(0, x), Math.max(0, bounds.width - nextWidth));
+    const clampedY = Math.min(Math.max(0, y), Math.max(0, bounds.height - nextHeight));
     return {
-      x: Math.min(Math.max(0, x), Math.max(0, bounds.width - nextWidth)),
-      y: Math.min(Math.max(0, y), Math.max(0, bounds.height - nextHeight)),
+      x: shouldSnap ? snap(clampedX, gridSize) : clampedX,
+      y: shouldSnap ? snap(clampedY, gridSize) : clampedY,
       width: nextWidth,
       height: nextHeight,
     };
@@ -677,8 +703,9 @@ function App() {
     const rect = clampBlockRect(
       x ?? 72 + currentPage.blockIds.length * 16,
       y ?? 64 + currentPage.blockIds.length * 16,
-      220,
-      104,
+      216,
+      108,
+      true,
     );
     commitData((previous) => ({
       ...previous,
@@ -734,7 +761,8 @@ function App() {
   function updateBlockStyle(blockId: string, patch: Partial<SquareBlockStyle>) {
     const block = data.blocks[blockId];
     if (!block) return;
-    updateBlock(blockId, { style: { ...normalizeBlockStyle(block.style), ...patch } });
+    const nextPatch = "backgroundColor" in patch && !("fillEnabled" in patch) ? { ...patch, fillEnabled: true } : patch;
+    updateBlock(blockId, { style: { ...normalizeBlockStyle(block.style), ...nextPatch } });
   }
 
   function deleteBlock(blockId: string) {
@@ -813,10 +841,11 @@ function App() {
       const nextX = dragState.originalX + dx;
       const nextY = dragState.originalY + dy;
       const rect = clampBlockRect(
-        snapToGrid ? snap(nextX) : nextX,
-        snapToGrid ? snap(nextY) : nextY,
+        snapToGrid ? snap(nextX, gridSize) : nextX,
+        snapToGrid ? snap(nextY, gridSize) : nextY,
         block.width,
         block.height,
+        snapToGrid,
       );
       setAlignmentGuide(getAlignmentGuide(block.id, rect.x, rect.y, rect.width, rect.height));
       updateBlock(dragState.blockId, {
@@ -827,8 +856,8 @@ function App() {
     }
     if (dragState.mode === "text") {
       updateBlockStyle(dragState.blockId, {
-        textOffsetX: snapToGrid ? snap(dragState.originalTextOffsetX + dx) : dragState.originalTextOffsetX + dx,
-        textOffsetY: snapToGrid ? snap(dragState.originalTextOffsetY + dy) : dragState.originalTextOffsetY + dy,
+        textOffsetX: snapToGrid ? snap(dragState.originalTextOffsetX + dx, gridSize) : dragState.originalTextOffsetX + dx,
+        textOffsetY: snapToGrid ? snap(dragState.originalTextOffsetY + dy, gridSize) : dragState.originalTextOffsetY + dy,
       });
       return;
     }
@@ -839,8 +868,9 @@ function App() {
     const rect = clampBlockRect(
       block.x,
       block.y,
-      snapToGrid ? Math.max(MIN_BLOCK_WIDTH, snap(nextWidth)) : nextWidth,
-      snapToGrid ? Math.max(MIN_BLOCK_HEIGHT, snap(nextHeight)) : nextHeight,
+      snapToGrid ? Math.max(MIN_BLOCK_WIDTH, snap(nextWidth, gridSize)) : nextWidth,
+      snapToGrid ? Math.max(MIN_BLOCK_HEIGHT, snap(nextHeight, gridSize)) : nextHeight,
+      snapToGrid,
     );
     setAlignmentGuide(getAlignmentGuide(block.id, rect.x, rect.y, rect.width, rect.height));
     updateBlock(dragState.blockId, {
@@ -890,12 +920,16 @@ function App() {
           <SquareIcon src={ICONS.logo} size={42} />
           <div>
             <div className="app-name">Square</div>
+            <div className="mobile-current-title">{mobileTitle}</div>
             <div className="app-meta">개인용 블록 캔버스</div>
           </div>
         </div>
         <div className="mobile-top-actions">
           <button className="mobile-nav-button" onClick={() => setMobileSidebarOpen((open) => !open)}>
-            Pages
+            탐색
+          </button>
+          <button className="mobile-nav-button" onClick={() => setMobileToolsOpen((open) => !open)}>
+            도구
           </button>
           <button
             className="mobile-nav-button"
@@ -1015,7 +1049,10 @@ function App() {
                   <input type="checkbox" checked={snapToGrid} onChange={(event) => setSnapToGrid(event.target.checked)} />
                   정렬 모드
                 </label>
-                <button className="primary-button desktop-add-button" onClick={addBlock}>Block 추가</button>
+                <button className="primary-button desktop-add-button" onClick={addBlock}>
+                  <SquareIcon src={ICONS.block} size={17} />
+                  Block 추가
+                </button>
               </div>
             </div>
             <div
@@ -1044,7 +1081,8 @@ function App() {
                     className={[
                       "block",
                       block.id === selectedBlockId ? "selected" : "",
-                      showCodes ? "has-code" : "",
+                      showCodes && block.id === selectedBlockId ? "has-code" : "",
+                      !style.fillEnabled ? "no-fill" : "",
                     ]
                       .filter(Boolean)
                       .join(" ")}
@@ -1054,7 +1092,7 @@ function App() {
                       top: block.y,
                       width: block.width,
                       height: block.height,
-                      backgroundColor: style.backgroundColor === "transparent" ? "transparent" : style.backgroundColor,
+                      backgroundColor: style.fillEnabled ? style.backgroundColor : "transparent",
                       color: style.textColor,
                       fontSize: style.fontSize,
                       fontWeight: style.fontWeight,
@@ -1067,7 +1105,7 @@ function App() {
                       setEditingBlockId(block.id);
                     }}
                   >
-                    {showCodes && <div className="block-code">{block.code}</div>}
+                    {showCodes && block.id === selectedBlockId && <div className="block-code">{block.code}</div>}
                     {editingBlockId === block.id ? (
                       <textarea
                         autoFocus
@@ -1079,7 +1117,7 @@ function App() {
                     ) : (
                       <div
                         className="block-text"
-                        style={{ left: 10 + style.textOffsetX, top: (showCodes ? 30 : 10) + style.textOffsetY, textAlign: style.textAlign }}
+                        style={{ left: 10 + style.textOffsetX, top: (showCodes && block.id === selectedBlockId ? 30 : 10) + style.textOffsetY, textAlign: style.textAlign }}
                         onPointerDown={(event) => startTextMove(event, block)}
                       >
                         {block.content.text}
@@ -1134,12 +1172,15 @@ function App() {
             </section>
             <section className="property-section design-section">
               <h2>Block</h2>
+              <label className="checkbox-row">
+                <input type="checkbox" checked={!normalizeBlockStyle(selectedBlock.style).fillEnabled} onChange={(event) => updateBlockStyle(selectedBlock.id, { fillEnabled: !event.target.checked })} />
+                채우기 없음
+              </label>
               <div className="swatches">
                 {PASTEL_SWATCHES.map((color) => (
                   <button
                     className={[
-                      normalizeBlockStyle(selectedBlock.style).backgroundColor === color ? "swatch active" : "swatch",
-                      color === "transparent" ? "transparent-swatch" : "",
+                      normalizeBlockStyle(selectedBlock.style).fillEnabled && normalizeBlockStyle(selectedBlock.style).backgroundColor === color ? "swatch active" : "swatch",
                     ]
                       .filter(Boolean)
                       .join(" ")}
