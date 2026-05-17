@@ -145,6 +145,7 @@ type AlignmentGuide = {
   y?: number;
 };
 
+const APP_VERSION = "v0.3.0";
 const STORAGE_KEY = "square-v0.1-data";
 const FALLBACK_STORAGE_KEY = "square:v0.1:state";
 const MIN_BLOCK_WIDTH = 60;
@@ -1264,7 +1265,7 @@ function App() {
           <div>
             <div className="app-name">Square</div>
             <div className="mobile-current-title">{mobileTitle}</div>
-            <div className="app-meta">개인용 블록 캔버스</div>
+            <div className="app-meta">개인용 Square 캔버스 · {APP_VERSION}</div>
           </div>
         </div>
         <div className="mobile-top-actions">
