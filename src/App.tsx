@@ -121,6 +121,7 @@ type DragState =
       startY: number;
       originalX: number;
       originalY: number;
+      groupLayouts: Array<{ blockId: string; x: number; y: number; width: number; height: number }>;
     }
   | {
       mode: "resize";
@@ -146,8 +147,8 @@ type AlignmentGuide = {
 
 const STORAGE_KEY = "square-v0.1-data";
 const FALLBACK_STORAGE_KEY = "square:v0.1:state";
-const MIN_BLOCK_WIDTH = 96;
-const MIN_BLOCK_HEIGHT = 60;
+const MIN_BLOCK_WIDTH = 60;
+const MIN_BLOCK_HEIGHT = 36;
 const GRID_SIZE = 12;
 const GUIDE_THRESHOLD = 6;
 const ASSET_BASE_URL = import.meta.env.BASE_URL;
@@ -438,6 +439,7 @@ function App() {
   const [activeBookId, setActiveBookId] = useState(() => data.bookIds[0]);
   const [currentPageId, setCurrentPageId] = useState(() => data.books[data.bookIds[0]]?.pageIds[0] ?? "");
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+  const [selectedBlockIds, setSelectedBlockIds] = useState<string[]>([]);
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [editingPageTitle, setEditingPageTitle] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -525,6 +527,10 @@ function App() {
   }, [data]);
 
   useEffect(() => {
+    if (!selectedBlockId && selectedBlockIds.length > 0) setSelectedBlockIds([]);
+  }, [selectedBlockId, selectedBlockIds.length]);
+
+  useEffect(() => {
     if (!toast) return undefined;
     const timer = window.setTimeout(() => setToast(""), 1800);
     return () => window.clearTimeout(timer);
@@ -542,7 +548,8 @@ function App() {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Delete" || !selectedBlockId || editingBlockId) return;
-      deleteBlock(selectedBlockId);
+      const targetIds = selectedBlockIds.length > 0 ? selectedBlockIds : [selectedBlockId];
+      targetIds.forEach((blockId) => deleteBlock(blockId));
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
@@ -921,8 +928,8 @@ function App() {
     const rect = clampBlockRect(
       x ?? 72 + currentPage.blockIds.length * 16,
       y ?? 64 + currentPage.blockIds.length * 16,
-      216,
-      108,
+      96,
+      48,
       true,
     );
     commitData((previous) => ({
@@ -953,7 +960,7 @@ function App() {
             tablet: { ...rect, visible: true },
             mobile: { ...rect, visible: true },
           },
-          content: { text: "New text square" },
+          content: { text: "" },
           value: null,
           style: defaultBlockStyle(),
           visible: true,
@@ -965,6 +972,7 @@ function App() {
       counters: { ...previous.counters, nextBlockNumber: blockNumber + 1 },
     }), "Square를 추가했습니다");
     setSelectedBlockId(blockId);
+    setSelectedBlockIds([blockId]);
   }
 
   function addBlock() {
@@ -1087,9 +1095,30 @@ function App() {
       return;
     }
     if (editingBlockId === block.id) return;
+    event.stopPropagation();
     const layout = getBlockLayout(block);
+    const useModifierSelection = event.shiftKey || event.ctrlKey || event.metaKey;
+    const isAlreadySelected = selectedBlockIds.includes(block.id);
+    let nextSelectedBlockIds =
+      useModifierSelection
+        ? isAlreadySelected && selectedBlockIds.length > 1
+          ? selectedBlockIds.filter((id) => id !== block.id)
+          : Array.from(new Set([...selectedBlockIds, block.id]))
+        : isAlreadySelected && selectedBlockIds.length > 1
+          ? selectedBlockIds
+          : [block.id];
+    if (nextSelectedBlockIds.length === 0) nextSelectedBlockIds = [block.id];
+    const groupLayouts = nextSelectedBlockIds
+      .map((blockId) => {
+        const groupBlock = data.blocks[blockId];
+        if (!groupBlock) return null;
+        const groupLayout = getBlockLayout(groupBlock);
+        return { blockId, x: groupLayout.x, y: groupLayout.y, width: groupLayout.width, height: groupLayout.height };
+      })
+      .filter((item): item is { blockId: string; x: number; y: number; width: number; height: number } => Boolean(item));
     event.currentTarget.setPointerCapture(event.pointerId);
     setSelectedBlockId(block.id);
+    setSelectedBlockIds(nextSelectedBlockIds);
     setDragState({
       mode: "move",
       blockId: block.id,
@@ -1097,6 +1126,7 @@ function App() {
       startY: event.clientY,
       originalX: layout.x,
       originalY: layout.y,
+      groupLayouts,
     });
   }
 
@@ -1105,6 +1135,7 @@ function App() {
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     setSelectedBlockId(block.id);
+    setSelectedBlockIds([block.id]);
     setDragState({
       mode: "resize",
       blockId: block.id,
@@ -1147,10 +1178,21 @@ function App() {
         layout.height,
         snapToGrid,
       );
+      const groupDx = rect.x - dragState.originalX;
+      const groupDy = rect.y - dragState.originalY;
       setAlignmentGuide(getAlignmentGuide(block.id, rect.x, rect.y, rect.width, rect.height));
-      updateBlockLayout(dragState.blockId, {
-        x: rect.x,
-        y: rect.y,
+      dragState.groupLayouts.forEach((groupLayout) => {
+        const groupRect = clampBlockRect(
+          snapToGrid ? snap(groupLayout.x + groupDx, gridSize) : groupLayout.x + groupDx,
+          snapToGrid ? snap(groupLayout.y + groupDy, gridSize) : groupLayout.y + groupDy,
+          groupLayout.width,
+          groupLayout.height,
+          snapToGrid,
+        );
+        updateBlockLayout(groupLayout.blockId, {
+          x: groupRect.x,
+          y: groupRect.y,
+        });
       });
       return;
     }
@@ -1393,7 +1435,7 @@ function App() {
                     </marker>
                   </defs>
                   {logicLinks.map((link) => {
-                    const selected = selectedBlockId === link.source.id || selectedBlockId === link.target.id;
+                    const selected = selectedBlockIds.includes(link.source.id) || selectedBlockIds.includes(link.target.id);
                     const midX = (link.x1 + link.x2) / 2;
                     const midY = (link.y1 + link.y2) / 2;
                     return (
@@ -1420,7 +1462,7 @@ function App() {
                   <div
                     className={[
                       "block",
-                      block.id === selectedBlockId ? "selected" : "",
+                      selectedBlockIds.includes(block.id) ? "selected" : "",
                       showCodes && block.id === selectedBlockId ? "has-code" : "",
                       !layout.visible ? "hidden-square" : "",
                       !style.fillEnabled ? "no-fill" : "",
@@ -1444,6 +1486,7 @@ function App() {
                     onDoubleClick={() => {
                       if (appMode === "run") return;
                       setSelectedBlockId(block.id);
+                      setSelectedBlockIds([block.id]);
                       setEditingBlockId(block.id);
                     }}
                   >
@@ -1459,7 +1502,7 @@ function App() {
                         onBlur={() => setEditingBlockId(null)}
                         onPointerDown={(event) => event.stopPropagation()}
                       />
-                    ) : (
+                    ) : block.content.text ? (
                       <div
                         className="block-text"
                         style={{ left: 10 + style.textOffsetX, top: (showCodes && block.id === selectedBlockId ? 30 : 10) + style.textOffsetY, textAlign: style.textAlign }}
@@ -1467,6 +1510,8 @@ function App() {
                       >
                         {block.content.text}
                       </div>
+                    ) : (
+                      block.id === selectedBlockId && <div className="block-empty-label">Square</div>
                     )}
                     <button className="resize-handle" aria-label="resize square" onPointerDown={(event) => startResize(event, block)} />
                   </div>
