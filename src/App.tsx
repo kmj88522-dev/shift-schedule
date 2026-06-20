@@ -10,6 +10,7 @@ type DaySchedule = {
   note: string;
   location: string;
   endDate: string;
+  color: string;
 };
 
 type AppConfig = {
@@ -47,11 +48,13 @@ const TEAM_REF: Record<string, string> = {
 
 const EX_COLORS: Record<ExceptionType, string> = {
   연가: "#22c55e",
-  교육: "#3b82f6",
+  교육: "#0ea5e9",
   출장: "#8b5cf6",
   병가: "#94a3b8",
   기타: "#f97316",
 };
+
+const SCHED_COLORS = ["#ef4444","#f97316","#eab308","#22c55e","#3b82f6","#8b5cf6","#ec4899","#64748b"];
 
 const DEFAULT_CONFIG: AppConfig = {
   teamPreset: "2팀",
@@ -216,16 +219,15 @@ export default function App() {
           <header className="topbar">
             <button className="nav-btn" onClick={prevMonth}>‹</button>
             <div className="topbar-mid">
-              <button className="month-btn" onClick={goToday}>{year}년 {month+1}월</button>
-              <div className="topbar-status">
+              <div className="topbar-row1">
+                <button className="month-btn" onClick={goToday}>{year}년 {month+1}월</button>
                 <span className="team-tag">{config.teamPreset}</span>
-                <span className="status-line">
-                  {today}({todayDow}){" "}
-                  <span className={todayShift==="당"?"clr-dang":"clr-bi"}>{todayLabel}</span>
-                  {" · 내일 "}
-                  <span className={tmrShift==="당"?"clr-dang":"clr-bi"}>{tmrLabel}</span>
-                  {showAlarm && <span className="clr-alarm"> ⏰{minsToTime(config.alarmFirstMinutes)}</span>}
-                </span>
+              </div>
+              <div className="topbar-row2">
+                <span className={`shift-pill ${todayShift==="당"?"dang":"bi"}`}>오늘 {todayLabel}</span>
+                <span className="row2-sep">·</span>
+                <span className={`shift-pill ${tmrShift==="당"?"dang":"bi"}`}>내일 {tmrLabel}</span>
+                {showAlarm && <span className="alarm-pill">⏰{minsToTime(config.alarmFirstMinutes)}</span>}
               </div>
             </div>
             <button className="nav-btn" onClick={nextMonth}>›</button>
@@ -258,7 +260,9 @@ export default function App() {
                         : <span className="label-bi">비</span>
                     )}
                   </div>
-                  {day.isCurrentMonth && schedText && <div className="cell-sched">{schedText}</div>}
+                  {day.isCurrentMonth && schedText && (
+                    <div className="cell-sched" style={day.schedule?.color ? {background:day.schedule.color, color:"#fff"} : undefined}>{schedText}</div>
+                  )}
                 </button>
               );
             })}
@@ -371,6 +375,7 @@ function DaySheet({dateStr, shift, schedule, onSave, onRemove, onClose}: {
   const [note, setNote] = useState(schedule?.note??"");
   const [location, setLocation] = useState(schedule?.location??"");
   const [endDate, setEndDate] = useState(schedule?.endDate??dateStr);
+  const [color, setColor] = useState(schedule?.color??SCHED_COLORS[4]);
   const [y,m,d] = dateStr.split("-");
   const isDang = shift==="당";
   const badgeColor = isDang ? (exType ? EX_COLORS[exType] : "#f59e0b") : null;
@@ -431,9 +436,18 @@ function DaySheet({dateStr, shift, schedule, onSave, onRemove, onClose}: {
           <input className="field-input" type="text" placeholder="장소" value={location} onChange={e=>setLocation(e.target.value)} />
         </div>
 
+        <div className="field-group">
+          <label className="field-label">색상</label>
+          <div className="color-picker">
+            {SCHED_COLORS.map(c => (
+              <button key={c} className={`color-dot ${color===c?"selected":""}`} style={{background:c}} onClick={() => setColor(c)} />
+            ))}
+          </div>
+        </div>
+
         <div className="sheet-btn-row">
           {schedule && <button className="btn-remove" onClick={onRemove}>삭제</button>}
-          <button className="btn-save" onClick={() => onSave({exceptionType:exType, title, note, location, endDate})}>저장</button>
+          <button className="btn-save" onClick={() => onSave({exceptionType:exType, title, note, location, endDate, color})}>저장</button>
         </div>
       </div>
     </>
